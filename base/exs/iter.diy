@@ -1,0 +1,10 @@
+public number factorial(integer n){
+  integer i;
+  integer fact := 1;
+
+  if n < 0 then factorial := 1;
+
+  for i in 1 upto n do fact := fact * i;
+
+  factorial := fact;
+}
