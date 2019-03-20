@@ -1,0 +1,10 @@
+integer r_next = 100003;
+
+public integer  rand(){
+  r_next := (r_next * 27983 + 149) % 1000000;
+  rand := r_next;
+}
+
+public void srand(integer i){
+  r_next := i;
+}

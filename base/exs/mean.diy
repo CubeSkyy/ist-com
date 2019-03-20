@@ -1,0 +1,15 @@
+public void printd(number n)
+public integer  rand()
+public integer readi()
+
+public integer entry (integer argc, string *argv, string *envp) {
+  integer i;
+  integer num;
+  number sum;
+
+  num := readi();
+  for i in 0 upto num do sum := sum + rand();
+  printd(sum/num);
+
+  entry := 0
+};
