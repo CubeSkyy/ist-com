@@ -6,13 +6,360 @@
 #include "node.h"
 #include "tabid.h"
 #include "postfix.h"
+
+extern FILE *outfp;
+int lbl;
+
+static long brklbl[20], brkcnt; /* break labels */
+static long contlbl[20], contcnt; /* continue labels */
+static char *extrns[100]; /* emit externs at the end only */
+static int extcnt;
+char *dupstr(const char *s);
+int isTypePrototype(Node* p, int type, int pos);
+int isInt(Node* p);
+int isReal(Node* p);
+int isIntRight(Node* p);
+int isRealRight(Node* p);
+int isIntLeft(Node* p);
+int isRealLeft(Node* p);
+int isIndex(Node* p);
+int isString(Node* p);
+int isStringRight(Node* p);
+void add_extrn(char* name);
+int left(Node* p);
+int right(Node* p);
+char *mklbl(int n) {
+  static char buf[20];
+  sprintf(buf, "_i%d", n);
+  return strcpy(malloc(strlen(buf)+1),buf);
+}
+
+static void outstr(char *s) {
+  while (*s) fprintf(outfp, pfCHAR, (unsigned char)*s++);
+  fprintf(outfp, pfCHAR, 0);
+}
+char *mkfunc(char *s) {
+  static char buf[80];
+  strcpy(buf, "_");
+  strcat(buf, s);
+  return buf;
+}
+
 %}
-%term END=';'
 %include "y.tab.h"
 %%
-stmt:	END	1	{	}
+file:	FUNC(bloco, params)
+
+bloco: NIL
+bloco: BLOCK(list, decls)
+bloco: BLOCK(END(list, end), decls)
+
+end: NIL
+end: brk
+
+params: PARAMS(params, param)
+params: NIL
+param: PARAM(tipo, ID)
+
+decls: NIL
+decls: END(decls, param)
+
+tipo: INTEGER
+tipo: STRING
+tipo: NUMBER
+
+list: END(list, base)
+list: END(NIL, base)
+
+base: NIL
+base: expr 1 {fprintf(outfp, pfTRASH, pfWORD);}
+base: rexpr 1 {fprintf(outfp, pfTRASH, pfWORD *2);}
+base: sexpr 1 {fprintf(outfp, pfTRASH, pfWORD);}
+base: bloco
+base: VOID
+
+stmt: base
+stmt: brk
+
+brk: BREAK 1 {fprintf(outfp, pfJMP, mklbl(brklbl[brkcnt - p->value.i + 1]));}
+brk: CONTINUE 1 {fprintf(outfp, pfJMP, mklbl(contlbl[contcnt - p->value.i + 1]));}
+
+%! string, integer and assignment, respectively
+sexpr: ATR(sexpr, LOCAL) isStringRight {fprintf(outfp, pfDUP pfLOCAL pfSTORE, RIGHT_CHILD(p)->value.i * (pfWORD/4)); }
+sexpr: ATR(sexpr, ID) isStringRight {fprintf(outfp,pfDUP pfADDR pfSTORE, RIGHT_CHILD(p)->value.s);}
+expr: ATR(expr, LOCAL) isIntRight {fprintf(outfp,pfDUP pfLOCAL pfSTORE, RIGHT_CHILD(p)->value.i * (pfWORD/4)); }
+expr: ATR(expr, ID) isIntRight {fprintf(outfp,pfDUP pfADDR pfSTORE, RIGHT_CHILD(p)->value.s);}
+rexpr: ATR(rexpr, LOCAL) isRealRight {fprintf(outfp, pfDUP2 pfLOCAL pfSTORE2, RIGHT_CHILD(p)->value.i * (pfWORD/4));}
+rexpr: ATR(rexpr, ID) isRealRight {fprintf(outfp, pfDUP2 pfADDR  pfSTORE2,  RIGHT_CHILD(p)->value.s);}
+
+%!increment assignment optimization ((i := i + 1 ) == (++i))
+expr: ATR(PLUS(PTR(lv), INT), ID) left {fprintf(outfp, pfDUP pfINCR pfLOAD, RIGHT_CHILD(LEFT_CHILD(p))->value.i);}
+expr: ATR(PLUS(PTR(lv), INT), LOCAL) left {fprintf(outfp, pfDUP pfINCR pfLOAD, RIGHT_CHILD(LEFT_CHILD(p))->value.i);}
+expr: ATR(PLUS(INT, PTR(lv)), ID) right {fprintf(outfp, pfDUP pfINCR pfLOAD, LEFT_CHILD(LEFT_CHILD(p))->value.i);}
+expr: ATR(PLUS(INT, PTR(lv)), LOCAL) right {fprintf(outfp, pfDUP pfINCR pfLOAD, LEFT_CHILD(LEFT_CHILD(p))->value.i);}
+
+%! single char assignment on strings (string[i] := integer)
+expr: ATR(expr, s_lv ) 1 {fprintf(outfp,  pfSTCHR pfDUP);}
+
+%! single char assignment on strings with dereferenced int (string := &int)
+sexpr: ATR(REF(lv), ID) isStringRight {fprintf(outfp, pfLOAD pfADDR pfLOAD pfSTCHR pfDUP, RIGHT_CHILD(p)->value.s);}
+sexpr: ATR(REF(lv), LOCAL) isStringRight {fprintf(outfp, pfLOAD pfLOCAL pfLOAD pfSTCHR pfDUP, RIGHT_CHILD(p)->value.i);}
+
+%! dereference assignment, var1 := &var2
+expr: ATR(REF(lv), lv) 1 {fprintf(outfp, pfSTORE);}
+
+%! Data types and type conversions
+expr: INT 1  {fprintf(outfp, pfIMM, p->value.i);}
+sexpr: STR 1 { fprintf(outfp, pfDATA pfALIGN pfLABEL, mklbl(++lbl)); outstr(p->value.s); fprintf(outfp, pfTEXT pfADDR, mklbl(lbl)); }
+rexpr: REAL 1 {lbl++; fprintf(outfp, pfRODATA pfALIGN pfLABEL pfDOUBLE pfTEXT pfADDR pfLOAD2, mklbl(lbl), p->value.r, mklbl(lbl) );}
+rexpr: expr 1 {fprintf(outfp, pfI2D); }
+expr: rexpr 2 {fprintf(outfp, pfD2I); }
+
+%! LOADs and reference/dereference
+expr: PTR(lv) isIndex { fprintf(outfp, pfLOAD); }
+expr: PTR(lv) isIntLeft { fprintf(outfp, pfLOAD); }
+rexpr:PTR(lv) isRealLeft { fprintf(outfp, pfLOAD2);}
+sexpr:PTR(lv) isString {fprintf(outfp, pfLOAD); }
+expr: PTR(s_lv) 1 { fprintf(outfp, pfLDCHR);}
+
+expr: PTR(PTR(lv)) 1 { fprintf(outfp, pfLOAD  pfLOAD); }
+expr: REF(lv)
+expr: REF(s_lv)
+
+%! left-values and index
+lv: ID 1 {fprintf(outfp, pfADDR, p->value.s); }
+lv: LOCAL 1 {fprintf(outfp, pfLOCAL, p->value.i * (pfWORD/4)); }
+lv: INDEX(lvec, expr) 1 { fprintf(outfp, pfIMM pfMUL pfADD, pfWORD); }
+s_lv: S_INDEX(lvec, expr) 1 { fprintf(outfp, pfADD); }
+lvec: lv 1 {fprintf(outfp, pfLOAD); }
+
+%! functions calls with integer/void return, string return and float return, respectively
+expr: CALL(ID, args) isInt {fprintf(outfp, pfCALL pfTRASH, mkfunc(LEFT_CHILD(p)->value.s), (int)(pfWORD*(RIGHT_CHILD(p)->place))); if(p->info != 4) fprintf(outfp, pfPUSH); fprintf(outfp, pfDUP);}
+expr: CALL(ID, VOID) isInt {fprintf(outfp, pfCALL pfPUSH pfDUP, mkfunc(LEFT_CHILD(p)->value.s));}
+sexpr: CALL(ID, args) isString {fprintf(outfp, pfCALL pfTRASH pfPUSH pfDUP, mkfunc(LEFT_CHILD(p)->value.s), (int)(pfWORD*(RIGHT_CHILD(p)->place)));  if(p->info != 4) fprintf(outfp, pfPUSH); fprintf(outfp, pfDUP);}
+sexpr: CALL(ID, VOID) isString {fprintf(outfp, pfCALL pfPUSH pfDUP, mkfunc(LEFT_CHILD(p)->value.s));}
+rexpr: CALL(ID, args) isReal {fprintf(outfp, pfCALL pfTRASH pfDPUSH pfDUP2, mkfunc(LEFT_CHILD(p)->value.s), (int)(pfWORD*(RIGHT_CHILD(p)->place)));}
+rexpr: CALL(ID, VOID) isReal {fprintf(outfp, pfCALL pfDPUSH pfDUP2, mkfunc(LEFT_CHILD(p)->value.s)); }
+
+%! fuction arguments
+args: PARAMS(arg, args) {p->place = LEFT_CHILD(p)->place + RIGHT_CHILD(p)->place;}
+args: NIL  {p->place = 0;}
+arg: expr  {p->place = 1;}
+arg: sexpr  {p->place = 1;}
+arg: rexpr  {p->place = 2;}
+
+%! integer arithmetic
+expr:	PLUS(expr,expr)	1 { fprintf(outfp, pfADD); }
+expr:	MINUS(expr,expr)	1 { fprintf(outfp, pfSUB); }
+expr: UMINUS(expr) 1 {fprintf(outfp, pfNEG); }
+expr:	MUL(expr,expr)	1 { fprintf(outfp, pfMUL); }
+expr:	DIV(expr,expr)	1 { fprintf(outfp, pfDIV); }
+expr:	MOD(expr,expr)	1 { fprintf(outfp, pfMOD); }
+expr:	LT(expr,expr)	1 { fprintf(outfp, pfLT); }
+expr:	GT(expr,expr)	1 { fprintf(outfp, pfGT); }
+expr:	GE(expr,expr)	1 { fprintf(outfp, pfGE); }
+expr:	LE(expr,expr)	1 { fprintf(outfp, pfLE); }
+expr:	NE(expr,expr)	1 { fprintf(outfp, pfNE); }
+expr:	EQ(expr,expr)	1 { fprintf(outfp, pfEQ); }
+expr:	AND(and,expr)	1 { lbl++; fprintf(outfp, pfDUP pfJZ pfTRASH pfIMM pfJMP pfLABEL pfIMM pfLABEL,
+   mklbl(LEFT_CHILD(p)->place), pfWORD, 1, mklbl(lbl), mklbl(LEFT_CHILD(p)->place), 0, mklbl(lbl) ); }
+and:	expr		1 { p->place = ++lbl; fprintf(outfp, pfDUP pfJZ pfTRASH, mklbl(p->place), pfWORD); }
+expr:	OR(or,expr)	1 { lbl++; fprintf(outfp, pfDUP pfJNZ pfTRASH pfIMM pfJMP pfLABEL pfIMM pfLABEL,
+   mklbl(LEFT_CHILD(p)->place), pfWORD, 0, mklbl(lbl), mklbl(LEFT_CHILD(p)->place), 1, mklbl(lbl) ); }
+or:	expr		1 { p->place = ++lbl; fprintf(outfp, pfDUP pfJNZ pfTRASH, mklbl(p->place), pfWORD); }
+expr:	NOT(expr)	1 { fprintf(outfp, pfIMM pfEQ, 0); }
+
+%! factorial
+rexpr:FACT(expr) 1 {char* s = mkfunc("factorial"); add_extrn(s); fprintf(outfp, pfCALL pfTRASH pfDPUSH, s, pfWORD);}
+
+%! pre/post in/de-crement
+expr:	INCR(lv)	1 { fprintf(outfp, pfDUP pfINCR pfLOAD, 1); }
+expr:	DECR(lv)	1 { fprintf(outfp, pfDUP pfDECR pfLOAD, 1); }
+expr:	POSINC(lv)	1 { fprintf(outfp, pfDUP pfLOAD pfSWAP pfINCR, 1); }
+expr:	POSDEC(lv)	1 { fprintf(outfp, pfDUP pfLOAD pfSWAP pfDECR, 1); }
+
+%! floating point arithmetic
+rexpr: PLUS(rexpr, rexpr) 1 {fprintf(outfp, pfDADD); }
+rexpr: MINUS(rexpr, rexpr) 1 {fprintf(outfp, pfDSUB); }
+rexpr: UMINUS(rexpr) 1 { fprintf(outfp, pfDNEG);}
+rexpr: MUL(rexpr,rexpr)	1 { fprintf(outfp, pfDMUL); }
+rexpr: DIV(rexpr,rexpr)	1 { fprintf(outfp, pfDDIV); }
+expr:	LT(rexpr,rexpr)	1 { fprintf(outfp, pfDCMP pfIMM pfLT, 0); }
+expr:	GT(rexpr,rexpr)	1 { fprintf(outfp, pfDCMP pfIMM pfGT, 0); }
+expr:	GE(rexpr,rexpr)	1 { fprintf(outfp, pfDCMP pfIMM pfGE, 0); }
+expr:	LE(rexpr,rexpr)	1 { fprintf(outfp, pfDCMP pfIMM pfLE, 0); }
+expr:	NE(rexpr,rexpr)	1 { fprintf(outfp, pfDCMP pfIMM pfNE, 0); }
+expr:	EQ(rexpr,rexpr)	1 { fprintf(outfp, pfDCMP pfIMM pfEQ, 0); }
+
+%! compare strings (with strcmp)
+expr:	LT(sexpr,sexpr)	1 { char* s = mkfunc("strcmp"); add_extrn(s); fprintf(outfp, pfCALL pfTRASH pfPUSH pfIMM pfLT, s, pfWORD * 2, 0); }
+expr:	GT(sexpr,sexpr)	1 { char* s = mkfunc("strcmp"); add_extrn(s);fprintf(outfp, pfCALL pfTRASH pfPUSH pfIMM pfGT, s, pfWORD * 2, 0); }
+expr:	GE(sexpr,sexpr)	1 { char* s = mkfunc("strcmp"); add_extrn(s);fprintf(outfp, pfCALL pfTRASH pfPUSH pfIMM pfGE, s, pfWORD * 2, 0); }
+expr:	LE(sexpr,sexpr)	1 { char* s = mkfunc("strcmp"); add_extrn(s);fprintf(outfp, pfCALL pfTRASH pfPUSH pfIMM pfLE, s, pfWORD * 2, 0); }
+expr:	NE(sexpr,sexpr)	1 { char* s = mkfunc("strcmp"); add_extrn(s);fprintf(outfp, pfCALL pfTRASH pfPUSH pfIMM pfNE, s, pfWORD * 2, 0); }
+expr: EQ(sexpr,sexpr)	1 { char* s = mkfunc("strcmp"); add_extrn(s);fprintf(outfp, pfCALL pfTRASH pfPUSH pfIMM pfEQ, s, pfWORD * 2, 0); }
+
+%! memory allocation in stack, <int # N> alocates space for N ints
+base: ALLOC(expr, ID) 1 { fprintf(outfp, pfIMM pfMUL pfALLOC, pfWORD * (RIGHT_CHILD(p)->info != 3 ? 1 : 2));}
+base: ALLOC(expr, LOCAL) 1 { fprintf(outfp, pfIMM pfMUL pfALLOC, pfWORD * (RIGHT_CHILD(p)->info != 3 ? 1 : 2));}
+
+%! simple if (no else)
+base:	IF(cond,stmt)	1 { fprintf(outfp, pfLABEL, mklbl(LEFT_CHILD(p)->place)); }
+cond:	expr		1 { p->place = ++lbl; fprintf(outfp, pfJZ, mklbl(p->place)); }
+
+%! if-else
+base:	ELSE(if,stmt)	1 { fprintf(outfp, pfLABEL, mklbl(LEFT_CHILD(p)->place)); }
+if:	IF(cond,stmt)	1 { p->place = ++lbl; fprintf(outfp, pfJMP pfLABEL,
+				mklbl(p->place), mklbl(LEFT_CHILD(p)->place)); }
+
+%! do-while
+base: WHILE(do, expr) 1 {contcnt--; brkcnt--;fprintf(outfp, pfJNZ pfLABEL, mklbl(LEFT_CHILD(LEFT_CHILD(p))->place), mklbl(LEFT_CHILD(p)->place + 1));}
+do: DO(start, stmt) 1 { p->place = LEFT_CHILD(p)->place + 1;  fprintf(outfp, pfLABEL, mklbl(p->place));}
+start: START 1  {p->place = ++lbl; contlbl[++contcnt] = ++lbl; brklbl[++brkcnt] = ++lbl; fprintf(outfp, pfLABEL, mklbl(p->place));}
+
+%! for
+base: END(expr, for) 1 { brkcnt--; contcnt--; p->place = RIGHT_CHILD(p)->place; fprintf(outfp, pfJMP pfLABEL, mklbl(p->place), mklbl(p->place + 1));}
+for: FOR(in, END(f_stmt, atr)) 1 {p->place = LEFT_CHILD(p)->place;}
+in: IN(do_start, LE(ptr, expr)) 1 {p->place = LEFT_CHILD(p)->place; fprintf(outfp, pfLE pfJZ , mklbl(p->place + 1));}
+in: IN(do_start, GE(ptr, expr)) 1 {p->place = LEFT_CHILD(p)->place; fprintf(outfp, pfGE pfJZ , mklbl(p->place + 1));}
+ptr: PTR(lv) 1 { fprintf(outfp, pfLOAD); }
+do_start: START {p->place = ++lbl; brklbl[++brkcnt] = ++lbl; contlbl[++contcnt] = ++lbl; fprintf(outfp, pfLABEL ,mklbl(p->place)); }
+f_stmt: stmt 1 {fprintf(outfp, pfLABEL, mklbl(contlbl[contcnt]));}
+atr: ATR(inc_dec, lv) 1 {fprintf(outfp, pfSTORE);}
+inc_dec: PLUS(PTR(lv), INT) 1  { int add = RIGHT_CHILD(p)->value.i;fprintf(outfp, pfLOAD pfIMM pfADD, add);}
+inc_dec: MINUS(PTR(lv), INT) 1 { int sub = RIGHT_CHILD(p)->value.i;fprintf(outfp, pfLOAD pfIMM pfSUB, sub);}
+
 %%
 #include "y.tab.h"
 extern void yyerror(const char*);
 extern char **yynames;
 extern int trace;
+
+void variable(int pub, int cnst, char *name, Node* init, int type){
+
+  if(!init && pub) {add_extrn(name); return;}
+
+  if(!(init && (init->attrib == STR || init->attrib == CONST))){
+    if (!init) fprintf(outfp, pfBSS);
+    else fprintf(outfp, pfDATA);
+    fprintf(outfp, pfGLOBL pfALIGN pfLABEL, name, pfOBJ, name);
+  }
+
+  if (init) {
+      switch (init->attrib) {
+        case INT: fprintf(outfp, pfWORD == 4 ? pfINTEGER : pfLONG, init->value.i); break;
+	      case ID: fprintf(outfp, pfID, init->value.s); break;
+        case REAL: {
+          fprintf(outfp, pfDOUBLE, init->value.r); break;
+        }
+	      case STR: {
+          char *l = mklbl(++lbl);
+          fprintf(outfp, pfDATA pfALIGN pfLABEL, l);
+			    outstr(init->value.s);
+          fprintf(outfp, pfGLOBL pfALIGN pfLABEL pfID, name, pfOBJ, name, l);
+          break;
+        }
+        case CONST:{
+          char *l = mklbl(++lbl);
+          fprintf(outfp, pfRODATA pfALIGN pfLABEL, l);
+          outstr(init->value.s);
+          fprintf(outfp, pfDATA pfALIGN pfGLOBL pfALIGN pfLABEL pfID, name, pfOBJ, name, l);
+          break;
+        }
+      }
+  }
+  else fprintf(outfp, pfBYTE, pfWORD * (type != 3 ? 1 : 2) );
+}
+
+void func(int pub, int type, char* name, Node* body, int enter){
+  extern int errors, trace;
+  extern char **yynames;
+  if (errors) return;
+
+  fprintf(outfp, pfTEXT pfALIGN pfGLOBL pfLABEL pfENTER, mkfunc(name), pfFUNC, mkfunc(name), enter * (pfWORD/4));
+	yyselect(body);
+  // Double, int or no return, respectively
+  if (type == 3) fprintf(outfp, pfLOCAL pfLOAD2 pfDPOP, -8);
+  else if (type != 4) fprintf(outfp, pfLOCAL pfLOAD pfPOP, -4);
+  fprintf(outfp, pfLEAVE pfRET);
+}
+
+void externs(){
+  int i;
+
+  for (i = 0; i < extcnt; i++)
+    if (extrns[i])
+      fprintf(outfp, pfEXTRN, extrns[i]);
+}
+
+
+void add_extrn(char* name){
+  for(int i = 0; i < extcnt; i++){
+    if (!strcmp(extrns[i],name)) return;
+  }
+  extrns[extcnt++] = dupstr(name);
+}
+
+//Compare a node or a left/right child of a node with a type.
+int isTypePrototype(Node* p, int type, int pos){
+  if (pos == -1) p = LEFT_CHILD(p);
+  if (pos == 1) p = RIGHT_CHILD(p);
+  //if int, void, int* or const int, treat as int
+  if(type == 1) return (p->info == 1 || p->info == 4 ||  p->info == 6 || p->info == 11 ) ? 1 : MAX_COST;
+  else return p->info == type ? 1 : MAX_COST;
+}
+
+
+int isIntLeft(Node* p){
+    return isTypePrototype(p, 1, -1);
+}
+
+int isRealLeft(Node* p){
+  return isTypePrototype(p, 3, -1);
+}
+
+int isIntRight(Node* p){
+  return isTypePrototype(p, 1, 1);
+}
+
+int isRealRight(Node* p){
+  return isTypePrototype(p, 3, 1);
+}
+
+int isInt(Node* p){
+  return isTypePrototype(p, 1, 0);
+}
+
+int isReal(Node* p){
+  return isTypePrototype(p, 3, 0);
+}
+
+int isString(Node* p){
+  return isTypePrototype(p, 2, 0);
+}
+int isStringRight(Node* p){
+  return isTypePrototype(p, 2, 1);
+}
+
+int isIndex(Node* p){
+  p = LEFT_CHILD(p);
+  if (p->attrib == INDEX) return 1;
+  else return MAX_COST;
+}
+
+//Compares IDS for assignment optimization (<i = i+1> == <++i>)
+int left(Node* p){
+  Node* leftNode = LEFT_CHILD(LEFT_CHILD(LEFT_CHILD(p)));
+  Node* rightNode = RIGHT_CHILD(p);
+  if (leftNode->attrib != rightNode->attrib) return MAX_COST;
+  if(leftNode->attrib == LOCAL) return leftNode->value.i == rightNode->value.i ? 1 : MAX_COST;
+  if (leftNode->attrib == ID) return (strcmp(leftNode->value.s, rightNode->value.s) == 0) ? 1 : MAX_COST;
+}
+
+int right(Node* p){
+  Node* leftNode = LEFT_CHILD(RIGHT_CHILD(LEFT_CHILD(p)));
+  Node* rightNode = RIGHT_CHILD(p);
+  if (leftNode->attrib != rightNode->attrib) return MAX_COST;
+  if(leftNode->attrib == LOCAL) return leftNode->value.i == rightNode->value.i ? 1 : MAX_COST;
+  if (leftNode->attrib == ID) return (strcmp(leftNode->value.s, rightNode->value.s) == 0) ? 1 : MAX_COST;
+}

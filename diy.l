@@ -1,104 +1,88 @@
 %{
+/* $Id: diy.l,v 1.0 2019/02/15 11:13:32 prs Exp $ */
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include "node.h"
 #include "y.tab.h"
-
+static int eoi; /* end of instruction */
+static int ncom; /* comment nesting level */
+static int in; /* in string */
 void yyerror(char *s);
-int strtoint(char* s, int base), hexdecimal(char* s);
-char *dupstr(const char *s);
-
-int nest = 0;
+int octal(char *s);
 %}
-%x COM STR NEWL
+%x COM CHR
+FLT	[0-9]+\.[0-9]+([Ee][+-]?[0-9]+)?
 %%
+"==".*                  ;
+"=<"			ncom = 1; BEGIN COM;
+<COM>.|\n		;
+<COM>\"([^"\\]|\\.)*\"	;
+<COM>"=<"		ncom++;
+<COM>"=>"		if (--ncom == 0) BEGIN 0;
 
-"void"     return VOID;
-"public"   return PUBLIC;
-"const"    return CONST;
-"if"       return IF;
-"then"     return THEN;
-"else"     return ELSE;
-"while"    return WHILE;
-"do"       return DO;
-"for"			 return FOR;
-"in"       return IN;
-"step"     return STEP;
-"upto"     return UPTO;
-"downto"   return DOWNTO;
-"break"    return BREAK;
-"continue" return CONTINUE;
-"integer"  return INT_TYPE;
-"string"   return STRING_TYPE;
-"number"   return NUM_TYPE;
-"++"       return INC;
-"--"       return DEC;
-"<="       return LE;
-">="       return GE;
-"<>"       return NE;
-":="       return ASSIGN;
+">="			eoi = 0; return GE;
+"<="			eoi = 0; return LE;
+"<>"			eoi = 0; return NE;
+":="			eoi = 0; return ATR;
+"++"			eoi = 0; return INCR;
+"--"			eoi = 0; return DECR;
+"if"			eoi = 0; return IF;
+"then"			eoi = 0; return THEN;
+"else"			eoi = 0; return ELSE;
+"while"			eoi = 0; return WHILE;
+"do"			eoi = 0; return DO;
+"for"			eoi = 0; return FOR;
+"in"			eoi = 0; return IN;
+"upto"			eoi = 0; return UPTO;
+"downto"		eoi = 0; return DOWNTO;
+"step"			eoi = 0; return STEP;
+"void"			eoi = 0; return VOID;
+"integer"		eoi = 0; return INTEGER;
+"string"		eoi = 0; return STRING;
+"number"		eoi = 0; return NUMBER;
+"public"		eoi = 0; return PUBLIC;
+"const"			eoi = 0; return CONST;
+"break"			eoi = 0; return BREAK;
+"continue"		eoi = 0; return CONTINUE;
 
-"=<"      ; BEGIN COM;
-"==".*    ;  //inline comments
-<COM>"=<" ; nest++;
-<COM>"=>" ; if(nest == 0) BEGIN 0; else nest--;
-<COM>.|\n ;
+[A-Za-z][A-Za-z0-9_]*	eoi = 1; yylval.s = strdup(yytext); return ID;
+\"([^"\\]|\\(.|\n))*\"	eoi = 1; yylval.s = malloc(yyleng); *yylval.s = 0; in = 1; REJECT;
+\"			if (in) BEGIN CHR; else { yyerror("unterminated string"); return 0; }
+<CHR>\"			eoi = 1; BEGIN 0; return STR;
+<CHR>\\\"		strcat(yylval.s, "\"");
+<CHR>\\n		strcat(yylval.s, "\n");
+<CHR>\\r		strcat(yylval.s, "\n");
+<CHR>\\t		strcat(yylval.s, "\n");
+<CHR>\\[0-9a-fA-F][0-9a-fA-F]?	{ char s[2]; s[1] = 0; s[0] = strtol(yytext+1,0,16); strcat(yylval.s, s); }
+<CHR>\\.		yyerror("invalid escape sequence in string");
+<CHR>[^"]		strcat(yylval.s, yytext);
+0[0-9]+			eoi = 1; yylval.i = octal(yytext); return INT;
+[0-9]+			eoi = 1; errno = 0; yylval.i = strtol(yytext, 0, 10); if (errno == ERANGE) yyerror("overflow in decimal constant"); return INT;
+0b[01]+			eoi = 1; errno = 0; yylval.i = strtol(yytext+2, 0, 2); if (errno == ERANGE) yyerror("overflow in binary constant"); return INT;
+{FLT}			eoi = 1; yylval.r = strtod(yytext, 0); return REAL;
+[-<>+*/%=|&~!;#{},\[\](]	eoi = 0; return *yytext;
+[)!]			eoi = 1; return *yytext;
 
-<NEWL>" "     ;
-<NEWL>\n      BEGIN 0; return ';';  //if newline is found, return ; and leave NEWL state
-<NEWL>==.*\n  BEGIN 0; return ';';  //parse inline comments
-<NEWL>.       BEGIN 0;yyless(0);    //if anything else is found, leave NEWL state and return the read char to input
+[ \t\r]+		; /* ignore whitespace */
+[\n]+			if (eoi == 1) { eoi = 0; return ';'; }
 
-\"([^\\\"]|\\.)*\"[ \r\t]*\n?  yylval.s = malloc(yyleng); *yylval.s = 0; REJECT;
-\"         BEGIN STR;    //Start processing string after memory allocation
-<STR>\"    BEGIN NEWL; return STRING;
-<STR>\\\"  strcat(yylval.s, "\"");
-<STR>\\n   strcat(yylval.s, "\n");
-<STR>\\r   strcat(yylval.s, "\r");
-<STR>\\t   strcat(yylval.s, "\t");
-<STR>\\[a-fA-F0-9]{1,2} {char temp[2];
-                         temp[0] = hexdecimal(yytext+1); //creates string with correct char
-                         temp[1] = 0;
-                         strcat(yylval.s, temp);}        //and concatenates to s
-<STR>\\.   yyerror("invalid escape sequence in string");
-<STR>.|\n  strcat(yylval.s, yytext);
-
-[a-zA-Z][a-zA-Z0-9_]*  BEGIN NEWL; yylval.s = dupstr(yytext); return ID;
-[1-9][0-9]*            BEGIN NEWL; yylval.i = strtoint(yytext, 10); return INT;
-0[0-9]*[ \r\t]*        BEGIN NEWL; yylval.i = strtoint(yytext+1, 8); return INT;
-0b[01]+[ \r\t]*        BEGIN NEWL; yylval.i = strtol(yytext+2, 0, 2); return INT;
-
-[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?  {BEGIN NEWL;
-                                   errno = 0;
-                                   yylval.d = strtod(yytext, 0);
-                                   if (errno == ERANGE)
-                                      yyerror("number overflow");
-                                   return NUM;}
-
-(!|\))                  BEGIN NEWL; return *yytext;
-[-+*/%&|~<>(;,\[\]{}#=]	return *yytext;
-[ \n\r\t]+		          ;
-.		                    yyerror("Unknown character");
-
+.			yyerror("Unknown character");
 %%
 int yywrap(void) {
   if (YYSTATE == COM) yyerror("unterminated comment");
-  if (YYSTATE == STR) yyerror("unterminated string");
   return 1;
 }
-char *getyytext() { return yytext; }
 
-//For bases within 1 and 10
-//Alternative to strtol that instead returns an int with 32 bit overflow check
-int strtoint(char *s, int base){
+int octal(char *s)
+{
   int i, a = 0, b = 0;
 
   for (i = 0; i < strlen(s); i++) {
     if (s[i] < '0' || s[i] > '9') break;
-    b = b * base + s[i] - '0';
+    b = b * 8 + s[i] - '0';
     if (b < a) {
-      yyerror("integer overflow");
+      yyerror("octal overflow");
       break;
     }
     a = b;
@@ -106,24 +90,4 @@ int strtoint(char *s, int base){
   return a;
 }
 
-//Transforms string with hex number to int
-int hexdecimal(char *s){
-  int i, a = 0, b = 0;
-
-  for (i = 0; i < strlen(s); i++) {
-    if (s[i] >= '0' && s[i] <= '9')
-      b = b * 16 + s[i] - '0';
-    else if (s[i] >= 'A' && s[i] <= 'F')
-      b = b * 16 + s[i] - 57;
-    else if (s[i] >= 'a' && s[i] <= 'f')
-      b = b * 16 + s[i] - 87;
-    else
-      break;
-    if (b < a) {
-      yyerror("hex overflow");
-      break;
-    }
-    a = b;
-  }
-  return a;
-}
+char *getyytext() { return yytext; }
