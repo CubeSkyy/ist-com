@@ -1,0 +1,10 @@
+
+  The files should be copied to a directory in the PATH ('echo $PATH' to see
+  the current PATH list). Usual places include the users bin/ directory $HOME/bin
+  if it exists (can be created and then added to the PATH in .bashrc on your
+  home directory), or /usr/local/bin if you can root the machine.
+
+  Most of these executables can be installed from the linux system provider
+  (ubunto, debian, red-hat, ...).
+  In ubunto: apt-get install flex
+  In fedora: yum install flex
