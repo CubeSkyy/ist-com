@@ -9,7 +9,6 @@ CFLAGS=-g -DYYDEBUG
 
 
 $(LANG): $(LANG).y $(LANG).l $(LANG).brg
-	make -C $(LIB)
 	byacc -dv $(LANG).y
 	flex -l $(LANG).l
 	pburg -T $(LANG).brg
@@ -20,6 +19,5 @@ examples:: $(LANG)
 
 clean::
 	make -C $(LIB) clean
-	make -C $(RUN) clean
 	make -C $(EXS) clean
 	rm -f *.o $(LANG) lex.yy.c y.tab.c y.tab.h y.output yyselect.c *.asm *~

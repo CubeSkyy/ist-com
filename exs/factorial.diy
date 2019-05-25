@@ -1,0 +1,17 @@
+public void printd(number n);
+public number factorial(integer i);
+public integer atoi(string s);
+
+public integer entry (integer argc, string *argv, string *envp) {
+
+  if argc = 1 then {
+    printd(factorial(5));
+    entry := 0;
+  }
+  else if argc = 2 then {
+    printd(factorial(atoi(argv[1])));
+    entry := 0;
+  }
+  else
+    entry := 1;
+};

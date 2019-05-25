@@ -8,7 +8,7 @@ public integer entry (integer argc, string *argv, string *envp) {
   number sum;
 
   num := readi();
-  for i in 0 upto num do sum := sum + rand();
+  for i in 0 upto num-1 do sum := sum + rand();
   printd(sum/num);
 
   entry := 0
