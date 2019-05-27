@@ -1,0 +1,13 @@
+public void prints(string s)
+public void printi(integer i)
+public void println()
+public integer atoi(string s)
+public integer grosa(integer i)
+public integer entry (integer argc, string *argv, string *envp) {
+  prints("Calling grosa with i = ")
+  prints(argv[1])
+  println()
+  printi(grosa(atoi(argv[1])))
+  println()
+  entry := 0
+};

@@ -21,6 +21,10 @@ FLT	[0-9]+\.[0-9]+([Ee][+-]?[0-9]+)?
 <COM>"=<"		ncom++;
 <COM>"=>"		if (--ncom == 0) BEGIN 0;
 
+
+
+"goto"    eoi = 0; return GOTO;
+"xor"     eoi = 0; return XOR;
 ">="			eoi = 0; return GE;
 "<="			eoi = 0; return LE;
 "<>"			eoi = 0; return NE;
@@ -47,6 +51,7 @@ FLT	[0-9]+\.[0-9]+([Ee][+-]?[0-9]+)?
 "continue"		eoi = 0; return CONTINUE;
 
 [A-Za-z][A-Za-z0-9_]*	eoi = 1; yylval.s = strdup(yytext); return ID;
+
 \"([^"\\]|\\(.|\n))*\"	eoi = 1; yylval.s = malloc(yyleng); *yylval.s = 0; in = 1; REJECT;
 \"			if (in) BEGIN CHR; else { yyerror("unterminated string"); return 0; }
 <CHR>\"			eoi = 1; BEGIN 0; return STR;
@@ -61,7 +66,7 @@ FLT	[0-9]+\.[0-9]+([Ee][+-]?[0-9]+)?
 [0-9]+			eoi = 1; errno = 0; yylval.i = strtol(yytext, 0, 10); if (errno == ERANGE) yyerror("overflow in decimal constant"); return INT;
 0b[01]+			eoi = 1; errno = 0; yylval.i = strtol(yytext+2, 0, 2); if (errno == ERANGE) yyerror("overflow in binary constant"); return INT;
 {FLT}			eoi = 1; yylval.r = strtod(yytext, 0); return REAL;
-[-<>+*/%=|&~!;#{},\[\](]	eoi = 0; return *yytext;
+[-<>+*/%=|&~!;#{},\[\](:]	eoi = 0; return *yytext;
 [)!]			eoi = 1; return *yytext;
 
 [ \t\r]+		; /* ignore whitespace */

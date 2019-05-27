@@ -169,6 +169,8 @@ expr:	OR(or,expr)	1 { lbl++; fprintf(outfp, pfDUP pfJNZ pfTRASH pfIMM pfJMP pfLA
 or:	expr		1 { p->place = ++lbl; fprintf(outfp, pfDUP pfJNZ pfTRASH, mklbl(p->place), pfWORD); }
 expr:	NOT(expr)	1 { fprintf(outfp, pfIMM pfEQ, 0); }
 
+expr:	XOR(expr,expr)	1 { fprintf(outfp, pfXOR); }
+
 %! factorial
 rexpr:FACT(expr) 1 {char* s = mkfunc("factorial"); add_extrn(s); fprintf(outfp, pfCALL pfTRASH pfDPUSH, s, pfWORD);}
 
@@ -228,6 +230,11 @@ f_stmt: stmt 1 {fprintf(outfp, pfLABEL, mklbl(contlbl[contcnt]));}
 atr: ATR(inc_dec, lv) 1 {fprintf(outfp, pfSTORE);}
 inc_dec: PLUS(PTR(lv), INT) 1  { int add = RIGHT_CHILD(p)->value.i;fprintf(outfp, pfLOAD pfIMM pfADD, add);}
 inc_dec: MINUS(PTR(lv), INT) 1 { int sub = RIGHT_CHILD(p)->value.i;fprintf(outfp, pfLOAD pfIMM pfSUB, sub);}
+
+base: LABEL 1 {fprintf(outfp, pfLABEL, p->value.s);}
+base:	GOTO	1 {fprintf(outfp, pfJMP, p->value.s); }
+
+
 
 %%
 #include "y.tab.h"

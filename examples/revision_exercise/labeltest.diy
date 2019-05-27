@@ -1,0 +1,17 @@
+public void prints(string s)
+public void printi(integer i)
+public void println()
+
+
+
+public integer entry (integer argc, string *argv, string *envp) {
+  prints("Before goto")
+  println()
+  goto test;
+  prints("After goto")
+  println()
+  test :
+  prints("After label")
+  println()
+  entry := 0
+};

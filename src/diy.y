@@ -25,7 +25,7 @@ void add_extrn(char*);
 char *mkfunc(char *s);
 static int ncicl;
 static char *fpar;
-int trace = 0;
+int trace = 1;
 int pos, arg_pos;
 %}
 
@@ -41,7 +41,7 @@ int pos, arg_pos;
 %token <s> ID STR
 %token DO WHILE IF THEN FOR IN UPTO DOWNTO STEP BREAK CONTINUE PARAMS BLOCK MINUS
 %token VOID INTEGER STRING NUMBER CONST PUBLIC INCR DECR RET END FUNC ALLOC PLUS
-%token INDEX FACT MUL DIV MOD GT LT EQ AND OR FNC S_INDEX
+%token INDEX FACT MUL DIV MOD GT LT EQ AND OR FNC S_INDEX GOTO LABEL
 %nonassoc IFX
 %nonassoc ELSE
 
@@ -49,6 +49,7 @@ int pos, arg_pos;
 %left '|'
 %left '&'
 %nonassoc '~'
+%right XOR
 %left '=' NE
 %left GE LE '>' '<'
 %left '+' '-'
@@ -134,6 +135,7 @@ stmt	: base
 	;
 
 base	: ';'                   { $$ = nilNode(VOID); }
+	| ID ':' { IDnew(9, $1, 0); $$ = strNode(LABEL, $1);}
 	| DO { ncicl++; } stmt WHILE expr ';' { $$ = binNode(WHILE, binNode(DO, nilNode(START), $3), $5); ncicl--; }
 	| FOR lv IN expr UPTO expr step DO { ncicl++; } stmt       { $$ = binNode(END, binNode(ATR, $4, $2), binNode(FOR, binNode(IN, nilNode(START), binNode(LE, uniNode(PTR, $2), $6)), binNode(END, $10, binNode(ATR, binNode(PLUS, uniNode(PTR, $2), $7), $2)))); ncicl--; }
 	| FOR lv IN expr DOWNTO expr step DO { ncicl++; } stmt     { $$ = binNode(END, binNode(ATR, $4, $2), binNode(FOR, binNode(IN, nilNode(START), binNode(GE, uniNode(PTR, $2), $6)), binNode(END, $10, binNode(ATR, binNode(MINUS, uniNode(PTR, $2), $7), $2)))); ncicl--; }
@@ -143,6 +145,8 @@ base	: ';'                   { $$ = nilNode(VOID); }
 	| bloco                 { $$ = $1; }
 	| lv '#' expr ';'       { $$ = binNode(ALLOC, $3, $1); }
 	| error ';'       { $$ = nilNode(NIL); }
+	| GOTO ID ';' { $$ = strNode(GOTO, $2); }
+
 	;
 
 end	:		{ $$ = nilNode(NIL); }
@@ -219,6 +223,7 @@ expr	: lv		{ $$ = uniNode(PTR, $1); $$->info = $1->info; }
                             $$->info = checkargs($1, $3); }
 	| ID '(' ')'    { $$ = binNode(CALL, strNode(ID, $1), nilNode(VOID));
                           $$->info = checkargs($1, 0); }
+  | expr XOR expr {$$ = binNode(XOR, $1, $3); $$->info = intonly($1, 0); intonly($3, 0);}
 	;
 
 %%

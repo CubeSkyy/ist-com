@@ -21,7 +21,7 @@ $(LANG): $(LANG).y $(LANG).l $(LANG).brg
 	./diy $< out.asm
 	nasm -felf32 -F dwarf -g out.asm
 	ld -melf_i386 out.o run/libdiy.a
-
+	#./a.out
 
 clean::
 	rm -f *.o $(LANG) lex.yy.c y.tab.c y.tab.h y.output yyselect.c *.asm *~ *.obj *.exe
