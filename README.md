@@ -5,7 +5,30 @@ A compiler for the diy language. This was a project for the Compiler Course in I
 The language is briefly described in portuguese in the pdf in root folder.
 The text was taken from the Course page, made by professor Pedro Rei dos Santos 2019-02-18
 
-Examples and tests can be found in the root folder.
+Example Ackermann function:
+
+```
+integer cnt := 0;
+integer ackermann (integer m, integer n) {
+  cnt := cnt + 1
+  if m = 0 then ackermann := n+1
+  else if n = 0 then ackermann := ackermann(m-1, 1)
+  else ackermann := ackermann(m-1, ackermann(m, n-1))
+};
+
+public integer entry (integer argc, string *argv, string *envp) {
+  if argc > 2 then {
+    printi(ackermann(atoi(argv[1]), atoi(argv[2])))
+    prints(" #")
+    printi(cnt)
+    println()
+  }
+  entry := 0
+};
+```
+
+More examples and tests can be found in the root folder.
+
 
 ## Getting Started
 
